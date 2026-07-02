@@ -1,16 +1,12 @@
 node_modules/
 dist/
 android/
-android-plugin/
 .cookie
 .qq-cookie
 updates/
-backups/
 *.log
 *.tmp
-.cache
 .env
-.env.*
 .DS_Store
 Thumbs.db
 .idea/

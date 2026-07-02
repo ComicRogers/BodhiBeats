@@ -6,8 +6,7 @@
   var InAppLogin = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.InAppLogin ? window.Capacitor.Plugins.InAppLogin : null;
   if (isDesktop) return;
   window.desktopWindow = {
-    isDesktop: false,
-    isCapacitorNative: isCap,
+    isDesktop: false, isCapacitorNative: isCap,
     openNeteaseMusicLogin: function(){ if (InAppLogin && isCap) return InAppLogin.openNeteaseLogin(); return Promise.resolve({ ok: false, error: 'USE_QR_FALLBACK' }); },
     clearNeteaseMusicLogin: function(){ if (InAppLogin && isCap) return InAppLogin.clearNeteaseLogin(); return Promise.resolve({ ok: true }); },
     openQQMusicLogin: function(){ if (InAppLogin && isCap) return InAppLogin.openQQLogin(); return Promise.resolve({ ok: false, error: 'USE_QR_FALLBACK' }); },

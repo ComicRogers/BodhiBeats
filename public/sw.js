@@ -1,13 +1,4 @@
-var CACHE_NAME = 'bodhibeats-v1';
-var PRECACHE_URLS = ['./', './index.html', './vendor/three.r128.min.js', './vendor/gsap.min.js', './manifest.webmanifest'];
-self.addEventListener('install', function(e){ e.waitUntil(caches.open(CACHE_NAME).then(function(c){ return c.addAll(PRECACHE_URLS).catch(function(){}); }).then(function(){ return self.skipWaiting(); })); });
-self.addEventListener('activate', function(e){ e.waitUntil(caches.keys().then(function(keys){ return Promise.all(keys.map(function(k){ if (k !== CACHE_NAME) return caches.delete(k); })); }).then(function(){ return self.clients.claim(); })); });
-self.addEventListener('fetch', function(e){
-  var req = e.request;
-  if (req.method !== 'GET') return;
-  var url = new URL(req.url);
-  if (url.pathname.indexOf('/api/') === 0) return;
-  if (url.origin === self.location.origin) {
-    e.respondWith(caches.match(req).then(function(cached){ var net = fetch(req).then(function(res){ if (res && res.status === 200) { var cl = res.clone(); caches.open(CACHE_NAME).then(function(c){ c.put(req, cl).catch(function(){}); }); } return res; }).catch(function(){ return cached; }); return cached || net; }));
-  }
-});
+var CACHE='bodhibeats-v1';var PRECACHE=['./','./index.html','./vendor/three.r128.min.js','./vendor/gsap.min.js','./manifest.webmanifest'];
+self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(PRECACHE).catch(function(){})}).then(function(){return self.skipWaiting()}))});
+self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(k){return Promise.all(k.map(function(c){if(c!==CACHE)return caches.delete(c)}))}).then(function(){return self.clients.claim()}))});
+self.addEventListener('fetch',function(e){var r=e.request;if(r.method!=='GET')return;var u=new URL(r.url);if(u.pathname.indexOf('/api/')===0)return;if(u.origin===self.location.origin){e.respondWith(caches.match(r).then(function(c){var n=fetch(r).then(function(res){if(res&&res.status===200){var cl=res.clone();caches.open(CACHE).then(function(ca){ca.put(r,cl).catch(function(){})})}return res}).catch(function(){return c});return c||n})})}});
