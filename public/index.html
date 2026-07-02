@@ -2272,6 +2272,23 @@ html.bodhibeats-mobile .home-card{min-height:96px!important}
 html.bodhibeats-mobile .home-card-title{max-width:76%!important}
 html.bodhibeats-mobile .home-card-sub{max-width:74%!important}
 html.bodhibeats-mobile .home-card-art{width:64px!important;height:64px!important}
+
+/* [Fix 5] 登录后头像错位: renderUserBtn() 会向 #user-btn 注入
+   头像+昵称+VIP徽章, 桌面规则是 width:auto, 但上方
+   "#top-right .icon-btn{width:44px}" 特异性更高, 把按钮压成
+   44px 圆形, 内容横向溢出冲出屏幕。此处豁免 #user-btn 并限宽截断。 */
+html.bodhibeats-mobile #top-right #user-btn{
+  width:auto!important;min-width:44px;height:44px;
+  flex:0 1 auto;overflow:hidden;
+}
+html.bodhibeats-mobile #top-right #user-btn.logged-in{padding:0 12px 0 4px}
+html.bodhibeats-mobile #user-btn.logged-in>span{
+  max-width:88px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+html.bodhibeats-mobile #user-btn.logged-in #user-avatar{width:34px;height:34px;border-radius:50%;object-fit:cover;flex-shrink:0}
+html.bodhibeats-mobile #top-right #user-btn.multi-account{height:auto!important;overflow:visible}
+html.bodhibeats-mobile #user-btn.multi-account .top-account-pill{max-width:calc(100vw - 132px)}
+html.bodhibeats-mobile #user-btn .top-account-vip{flex-shrink:0}
 </style>
 </head>
 
@@ -26031,6 +26048,10 @@ function isPlaylistPanelFocusActive(inTrigger, inPanel, pp, ex, ppRect) {
   return inTrigger || inPanel || (pp && pp.classList.contains('peek') && ex < ppRect.right + playlistPanelFocusPadding());
 }
 window.addEventListener('mousemove', function(e){
+  // [Mobile Hotfix] 该处理器的面板显隐几何判定按"桌面左侧贴边面板"设计
+  // (关闭条件 ex > panel.right, 移动端底部弹层 right≈屏宽, 永远无法关闭)。
+  // 触屏端面板显隐改由下方独立的触屏手势控制器负责。
+  if (window.bodhibeatsPlatform && window.bodhibeatsPlatform.isMobile) return;
   var sa = document.getElementById('search-area');
   var fp = document.getElementById('fx-panel');
   var pp = document.getElementById('playlist-panel');
@@ -27590,6 +27611,87 @@ animate();
       if (typeof showToast === 'function') showToast('再按一次退出 BodhiBeats');
     }).catch(function(){});
   }
+})();
+</script>
+<script>
+/* ================================================================
+   [Mobile Hotfix] 触屏底部弹层控制器 · 2026-07
+   歌单/队列(#playlist-panel)与视觉控制台(#fx-panel)在移动端是
+   底部弹层, 原"鼠标移开自动隐藏"在触屏上永远不触发, 导致无法收回。
+   本控制器提供三种关闭方式:
+   1) 点按弹层外任意区域
+   2) 在弹层上半部向下滑动(≥64px)
+   3) 轻点弹层顶部把手条区域
+   同时保留"点按屏幕顶部呼出搜索栏"的原指针行为。
+================================================================ */
+(function(){
+  if (!(window.bodhibeatsPlatform && window.bodhibeatsPlatform.isMobile)) return;
+  var PANELS = [
+    { id: 'playlist-panel', key: 'pl' },
+    { id: 'fx-panel', key: 'fx' }
+  ];
+  function isOpen(el){ return !!el && (el.classList.contains('show') || el.classList.contains('peek')); }
+  function closePanel(el, key){
+    if (!el) return;
+    try { if (typeof setPeek === 'function') setPeek(el, false, key); } catch(err){}
+    /* setPeek 可能因 pinned 等桌面态提前返回, 移动端强制收起 */
+    el.classList.remove('show');
+    el.classList.remove('peek');
+  }
+  /* --- 1) 点按弹层外部关闭 --- */
+  document.addEventListener('pointerdown', function(e){
+    var t = e.target;
+    /* 底栏与 FAB 上的按钮自身负责开关面板, 不在此拦截, 避免"关了又开"抖动 */
+    if (t && t.closest && t.closest('#bottom-bar, #fx-fab, #bottom-handle, #mini-queue-popover')) return;
+    PANELS.forEach(function(p){
+      var el = document.getElementById(p.id);
+      if (!isOpen(el)) return;
+      if (el.contains(t)) return;
+      closePanel(el, p.key);
+    });
+  }, true);
+  /* --- 2)/3) 弹层顶部: 下滑手势关闭 + 轻点把手关闭 ---
+     用 touch 事件而非 pointer 事件: 浏览器把触摸判定为滚动手势后会发
+     pointercancel 中断 pointermove 流, touchmove 则持续可用。 */
+  PANELS.forEach(function(p){
+    var el = document.getElementById(p.id);
+    if (!el) return;
+    var sy = null, sx = null, header = false, dragged = false;
+    function pt(e){ return (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]) || e; }
+    el.addEventListener('touchstart', function(e){
+      var c = pt(e);
+      var r = el.getBoundingClientRect();
+      header = (c.clientY - r.top) < 116;       /* 顶部把手+标题区 */
+      sy = c.clientY; sx = c.clientX; dragged = false;
+    }, { passive: true });
+    el.addEventListener('touchmove', function(e){
+      if (sy === null) return;
+      var c = pt(e);
+      var dy = c.clientY - sy, dx = Math.abs(c.clientX - sx);
+      if (Math.abs(dy) > 8 || dx > 8) dragged = true;
+      if (header && dy > 64 && dy > dx * 1.4) { closePanel(el, p.key); sy = null; }
+    }, { passive: true });
+    el.addEventListener('touchend', function(e){
+      if (sy !== null && !dragged) {
+        var c = pt(e);
+        var r = el.getBoundingClientRect();
+        var inHandleStrip = (c.clientY - r.top) < 34; /* 仅最顶部把手条 */
+        var onControl = e.target && e.target.closest && e.target.closest('button,input,select,a,[onclick],[role="button"]');
+        if (inHandleStrip && !onControl) closePanel(el, p.key);
+      }
+      sy = null;
+    }, { passive: true });
+    el.addEventListener('touchcancel', function(){ sy = null; }, { passive: true });
+  });
+  /* --- 保留: 点按屏幕顶部呼出搜索栏 (原由 mousemove 边缘检测负责) --- */
+  document.addEventListener('pointerdown', function(e){
+    if (e.clientY < 80) {
+      try {
+        var sa = document.getElementById('search-area');
+        if (sa && !sa.classList.contains('peek') && typeof setPeek === 'function') setPeek(sa, true, 'search');
+      } catch(err){}
+    }
+  }, true);
 })();
 </script>
 </body>
