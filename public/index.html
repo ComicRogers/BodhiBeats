@@ -2224,6 +2224,54 @@ html.bodhibeats-mobile .search-result:active{
 html.bodhibeats-mobile #progress-thumb{
   width:16px!important;height:16px!important;
 }
+
+/* ================================================================
+   ---------- 9. 真机修复补丁 (Mobile Hotfix · 2026-07) ----------
+   修复真机(如 VIVO X100 Pro)上的三类显示 bug:
+   1) Home hero"继续播放"卡被 flex 压扁成一条细线
+   2) 账号胶囊被桌面端 auto-hide 逻辑推出屏幕/名字溢出
+   3) 搜索栏与账号胶囊同排挤压重叠 → 改为双行头部
+================================================================ */
+
+/* [Fix 1] .empty-home-shell 是 flex 纵向容器, 子项默认 flex-shrink:1,
+   内容超出视口高度时 hero(min-height:0)会被压缩, aspect-ratio:1 失效,
+   最终塌陷成一条细条。禁止收缩, 交给 overflow-y:auto 滚动。 */
+html.bodhibeats-mobile .empty-home-shell>*{flex-shrink:0}
+html.bodhibeats-mobile .home-hero-inner{height:auto!important;min-height:0!important}
+html.bodhibeats-mobile .home-recent-song-card{min-height:0}
+
+/* [Fix 2] 桌面端"账号胶囊自动隐藏"(hover 交互)在触屏上无意义,
+   且 body.user-capsule-auto-hide 会把 #top-right 推到 right:-96px,
+   造成头像/用户名一半悬在屏幕外。移动端强制常驻可见。 */
+html.bodhibeats-mobile body.user-capsule-auto-hide #top-right{
+  right:calc(12px + env(safe-area-inset-right))!important;
+  opacity:1!important;visibility:visible!important;pointer-events:auto!important;
+}
+html.bodhibeats-mobile #top-right{max-width:calc(100vw - 24px)}
+html.bodhibeats-mobile .top-account-name{max-width:72px}
+
+/* [Fix 3] 原方案搜索栏与 #top-right 同一行(right:112px), 登录后
+   账号胶囊(头像+昵称)实际宽度可达 ~200px, 与搜索框重叠。
+   改为两行: 第一行 home/账号, 第二行通栏搜索。 */
+html.bodhibeats-mobile #search-area{
+  left:calc(12px + env(safe-area-inset-left))!important;
+  right:calc(12px + env(safe-area-inset-right))!important;
+}
+html.bodhibeats-mobile #search-area.peek,
+html.bodhibeats-mobile body.simple-mode #search-area.peek{
+  top:calc(66px + env(safe-area-inset-top))!important;
+}
+html.bodhibeats-mobile #empty-home{
+  top:calc(122px + env(safe-area-inset-top))!important;
+}
+
+/* [Fix 4] Home 卡片改单列, 与窄屏预期布局一致
+   (双列在 390~430px 宽度下标题/副标题空间不足, 观感拥挤)。 */
+html.bodhibeats-mobile .home-grid{grid-template-columns:1fr!important}
+html.bodhibeats-mobile .home-card{min-height:96px!important}
+html.bodhibeats-mobile .home-card-title{max-width:76%!important}
+html.bodhibeats-mobile .home-card-sub{max-width:74%!important}
+html.bodhibeats-mobile .home-card-art{width:64px!important;height:64px!important}
 </style>
 </head>
 
