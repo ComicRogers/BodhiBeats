@@ -10,5 +10,12 @@
     "allowMixedContent": true,
     "captureInput": true,
     "webContentsDebuggingEnabled": true
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 0,
+      "backgroundColor": "#050608",
+      "showSpinner": false
+    }
   }
 }
