@@ -2289,6 +2289,19 @@ html.bodhibeats-mobile #user-btn.logged-in #user-avatar{width:34px;height:34px;b
 html.bodhibeats-mobile #top-right #user-btn.multi-account{height:auto!important;overflow:visible}
 html.bodhibeats-mobile #user-btn.multi-account .top-account-pill{max-width:calc(100vw - 132px)}
 html.bodhibeats-mobile #user-btn .top-account-vip{flex-shrink:0}
+
+/* [Fix 6] 沉浸模式下底部 Dock 未完全隐藏: 上方 "#bottom-bar.visible
+   {opacity:1!important}" 压过了无 !important 的 .soft-hidden{opacity:0},
+   且桌面的 translateY(96px) 对更高的移动端双行 Dock 不够, 导致
+   进度条和半个播放按钮留在屏幕内。这里用同级 !important 完全隐藏。 */
+html.bodhibeats-mobile #bottom-bar.visible.soft-hidden{
+  opacity:0!important;
+  pointer-events:none!important;
+  transform:translateX(-50%) translateY(calc(100% + 60px)) scale(.97)!important;
+  background:transparent!important;
+  backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+  box-shadow:none!important;
+}
 </style>
 </head>
 
@@ -14230,6 +14243,7 @@ void main(){ vec4 t = texture2D(uDotTex, gl_PointCoord); if (t.a < 0.02) discard
       } else if (mode === 'side') {
         var contentOpen = contentList && contentList.isOpen();
         if (!allItems.length && !contentOpen) targetVis = 0;
+        else if (window.__bbMobileShelfHidden && !contentOpen) targetVis = 0;  /* [Mobile Hotfix] 移动端手势收起 */
         else targetVis = (contentOpen || shelfPinnedOpen || shelfAlwaysVisible()) ? 1.0 : (cueVis > 0.01 ? Math.max(0.16, cueVis * 0.88) : 0);
       } else {
         targetVis = allItems.length ? 1.0 : 0;
@@ -23238,6 +23252,7 @@ function setImmersiveMode(on) {
 
   immersiveMode = false;
   document.body.classList.remove('immersive-mode');
+  if (window.__bbMobileShelfHidden) window.__bbMobileShelfHidden = false;  /* [Mobile Hotfix] 退出沉浸恢复歌单 */
   closeMiniQueue();
   if (immersiveState.shelfMode) setShelfMode(immersiveState.shelfMode);
   if (immersiveState.shelfMode === 'side' && immersiveState.shelfPinnedOpen) setShelfPinnedOpen(true, true);
@@ -27749,23 +27764,63 @@ animate();
       } catch(err){}
     }
   }, true);
-  /* --- 3D 歌单架 / 歌单详情列表: 触屏滑动滚动 ---
+  /* --- 3D 歌单架 / 歌单详情列表: 触屏滑动滚动 + 手势显隐 ---
      原实现只监听 wheel 事件, 触屏无法滚动。手指在架子/详情上
-     纵向滑动时, 每累计 52px 换算为一次 scrollBy(±1)。 */
+     纵向滑动时, 每累计 52px 换算为一次 scrollBy(±1)。
+     另支持:
+     · 在歌单架上向右横滑 → 收起歌单 (点屏幕右侧唤回)
+     · 沉浸模式点按分区: 中间=隐藏全部UI / 最下方=切换播放 Dock /
+       右侧=切换歌单列表 */
+  window.__bbMobileShelfHidden = false;
+  function setMobileShelfHidden(on, silent){
+    on = !!on;
+    if (window.__bbMobileShelfHidden === on) return;
+    window.__bbMobileShelfHidden = on;
+    if (on) {
+      try {
+        if (typeof shelfManager !== 'undefined' && shelfManager) {
+          if (shelfManager.hasOpenContent && shelfManager.hasOpenContent() && shelfManager.closeContent) shelfManager.closeContent();
+          if (typeof shelfPinnedOpen !== 'undefined' && shelfPinnedOpen && typeof setShelfPinnedOpen === 'function') setShelfPinnedOpen(false, true);
+        }
+      } catch(err){}
+      if (!silent && typeof showToast === 'function') showToast('歌单已收起 · 点屏幕右侧唤回');
+    }
+  }
+  function mobileControlsVisible(){
+    var bar = document.getElementById('bottom-bar');
+    return !!(bar && bar.classList.contains('visible') && !bar.classList.contains('soft-hidden'));
+  }
+  function toggleMobileControls(){
+    try {
+      if (mobileControlsVisible()) { if (typeof setControlsHidden === 'function') setControlsHidden(true); }
+      else if (typeof revealBottomControls === 'function') revealBottomControls(3600);
+    } catch(err){}
+  }
+  function hideAllImmersiveUi(){
+    try { if (typeof setControlsHidden === 'function') setControlsHidden(true); } catch(err){}
+    setMobileShelfHidden(true, true);
+    try { if (typeof setPeek === 'function') setPeek(document.getElementById('search-area'), false, 'search'); } catch(err){}
+  }
+  function inRightShowZone(x, y){
+    return x > innerWidth - 88 && y > 110 && y < innerHeight - 150;
+  }
   (function(){
     var el = (typeof renderer !== 'undefined' && renderer && renderer.domElement) || null;
     if (!el) return;
-    var sy = null, acc = 0, mode = null;
+    var sy = null, sx = null, sx0 = 0, sy0 = 0, t0 = 0, acc = 0, mode = null, dragged = false, gestureDone = false;
     var STEP = 52;
     el.addEventListener('touchstart', function(e){
-      mode = null; sy = null;
+      mode = null; sy = null; dragged = false; gestureDone = false;
       if (!e.touches || e.touches.length !== 1) return;
       var t = e.touches[0];
+      sx0 = t.clientX; sy0 = t.clientY; t0 = Date.now();
+      sy = t.clientY; sx = t.clientX; acc = 0;
       try {
         if (typeof shelfManager === 'undefined' || !shelfManager) return;
         if (shelfManager.hasOpenContent && shelfManager.hasOpenContent()) {
           mode = 'detail';                       /* 详情打开: 全屏区域可滑 */
-        } else if (shelfManager.getMode && shelfManager.getMode() !== 'off'
+        } else if (!window.__bbMobileShelfHidden
+                   && shelfManager.getMode && shelfManager.getMode() !== 'off'
                    && shelfManager.canInteract && shelfManager.canInteract()) {
           /* 侧栏模式: 右侧热区或直接命中卡片时接管滑动 */
           var inZone = typeof isShelfWheelZone === 'function' && isShelfWheelZone(t);
@@ -27777,14 +27832,22 @@ animate();
           if (inZone || onCard) mode = 'shelf';
         }
       } catch(err){ mode = null; }
-      if (mode) { sy = t.clientY; acc = 0; }
     }, { passive: true });
     el.addEventListener('touchmove', function(e){
-      if (sy === null || !mode) return;
+      if (sy === null || gestureDone) return;
       var t = e.touches && e.touches[0];
       if (!t) return;
+      var totalDx = t.clientX - sx0, totalDy = t.clientY - sy0;
+      if (Math.abs(totalDx) > 10 || Math.abs(totalDy) > 10) dragged = true;
+      /* 歌单架上向右横滑 → 收起 */
+      if (mode === 'shelf' && totalDx > 64 && totalDx > Math.abs(totalDy) * 1.3) {
+        setMobileShelfHidden(true);
+        gestureDone = true;
+        return;
+      }
+      if (!mode) { sy = t.clientY; sx = t.clientX; return; }
       acc += (sy - t.clientY);
-      sy = t.clientY;
+      sy = t.clientY; sx = t.clientX;
       while (Math.abs(acc) >= STEP) {
         var dir = acc > 0 ? 1 : -1;
         acc -= dir * STEP;
@@ -27799,8 +27862,29 @@ animate();
         } catch(err){}
       }
     }, { passive: true });
-    el.addEventListener('touchend', function(){ sy = null; mode = null; }, { passive: true });
-    el.addEventListener('touchcancel', function(){ sy = null; mode = null; }, { passive: true });
+    el.addEventListener('touchend', function(e){
+      var wasTap = sy !== null && !dragged && !gestureDone && (Date.now() - t0) < 420;
+      sy = null; mode = null;
+      if (!wasTap) return;
+      var t = (e.changedTouches && e.changedTouches[0]);
+      if (!t) return;
+      var x = t.clientX, y = t.clientY;
+      var immersive = false;
+      try { immersive = typeof immersiveMode !== 'undefined' && !!immersiveMode; } catch(err){}
+      if (immersive) {
+        /* 沉浸模式三分区点按 */
+        if (y > innerHeight - 96) {
+          toggleMobileControls();                      /* 最下方: 切换播放 Dock */
+        } else if (inRightShowZone(x, y)) {
+          setMobileShelfHidden(!window.__bbMobileShelfHidden, true);  /* 右侧: 切换歌单 */
+        } else {
+          hideAllImmersiveUi();                        /* 中间: 只留歌词与封面 */
+        }
+      } else if (window.__bbMobileShelfHidden && inRightShowZone(x, y)) {
+        setMobileShelfHidden(false);                   /* 普通模式: 点右侧唤回歌单 */
+      }
+    }, { passive: true });
+    el.addEventListener('touchcancel', function(){ sy = null; mode = null; gestureDone = false; }, { passive: true });
   })();
 })();
 </script>
