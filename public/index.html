@@ -4194,8 +4194,10 @@ var RENDER_DPR_CAP = 1.35;
 var RENDER_PIXEL_BUDGET = 5200000;
 var RENDER_MIN_DPR = 0.72;
 // 移动端: 默认降低渲染预算, 避免高 DPR 手机过载
+// [Mobile Hotfix] DPR 上限从 1.0 提到 2.0: 1.0 在 3x 屏上会让歌词与
+// 歌单详情等 canvas 文字整体发虚模糊; 像素预算仍限制总开销。
 if (window.bodhibeatsPlatform && window.bodhibeatsPlatform.isMobile) {
-  RENDER_DPR_CAP = 1.0;
+  RENDER_DPR_CAP = 2.0;
   RENDER_PIXEL_BUDGET = 2600000;
   RENDER_MIN_DPR = 0.56;
 }
@@ -6193,6 +6195,25 @@ var dotTexture = makeDotTexture();
 //   - 共享: 封面色采样, 鼠标交互, 粒子大小限制
 // ============================================================
 var PLANE_SIZE = 4.8;
+// [Mobile Hotfix] 竖屏视锥工具: 相机在给定深度处的可见半宽(世界单位)。
+// 竖屏下水平视场随宽高比收窄, 固定世界尺寸的封面/歌单会溢出屏幕。
+function portraitVisibleHalfWidth(depthFromCamera) {
+  var fovNum = Number(camera && camera.fov);
+  if (!isFinite(fovNum) || fovNum <= 0) fovNum = 45;
+  var aspectNum = Number(camera && camera.aspect);
+  if (!isFinite(aspectNum) || aspectNum <= 0) aspectNum = innerWidth / Math.max(1, innerHeight);
+  var depthNum = Number(depthFromCamera);
+  if (!isFinite(depthNum) || depthNum <= 0) depthNum = 6.6;
+  return Math.tan(fovNum * Math.PI / 360) * Math.max(1.5, depthNum) * aspectNum;
+}
+function portraitCoverFitScale() {
+  if (innerWidth >= innerHeight) return 1;
+  var dist = Number(typeof orbit !== 'undefined' && orbit && orbit.radius);
+  if (!isFinite(dist) || dist <= 0) dist = 6.6;
+  var halfW = portraitVisibleHalfWidth(dist);
+  var fit = (halfW * 2 * 0.94) / PLANE_SIZE;
+  return isFinite(fit) ? clampRange(fit, 0.42, 1) : 1;
+}
 var RIPPLE_MAX = 12;
 
 var GRID_X = coverParticleGridForResolution(fx.coverResolution), GRID_Y = GRID_X;
@@ -9565,7 +9586,10 @@ function updateStageLyrics3D(dt) {
   var lockDistance = lockBaseDistance + layoutZ;
   var cameraLockedLyrics = (fx.lyricCameraLock || wallpaperLyricLock) && camera;
   var skullLyricEdgeGuard = !!(fx && fx.preset === SKULL_PRESET_INDEX && (orbit.centerLocked || orbit.recentering));
-  var lockFit = (cameraLockedLyrics || skullLyricEdgeGuard || skullMouthLyrics) ? lyricCameraLockFit(layoutScale, layoutX, layoutY, skullMouthLyrics ? Math.max(2.2, 4.4 + layoutZ) : lockDistance) : 1;
+  // [Mobile Hotfix] 竖屏手机: 即使未开启镜头锁定, 也启用视口适配,
+  // 否则固定世界尺寸的歌词平面会超出收窄的水平视场被裁切。
+  var mobilePortraitLyricFit = !!(window.bodhibeatsPlatform && window.bodhibeatsPlatform.isMobile) && innerHeight > innerWidth;
+  var lockFit = (cameraLockedLyrics || skullLyricEdgeGuard || skullMouthLyrics || mobilePortraitLyricFit) ? lyricCameraLockFit(layoutScale, layoutX, layoutY, skullMouthLyrics ? Math.max(2.2, 4.4 + layoutZ) : lockDistance) : 1;
   if (skullMouthLyrics) lockFit = Math.min(lockFit, 1.12);
   if (!isFinite(stageLyrics.lockFitScale)) stageLyrics.lockFitScale = 1;
   stageLyrics.lockFitScale += (lockFit - stageLyrics.lockFitScale) * (lockFit < stageLyrics.lockFitScale ? 0.18 : 0.10);
@@ -13266,7 +13290,7 @@ function shelfLayoutProfile() {
   var skullShelf = shouldUseSkullSafeShelfCamera();
   var detailScale = portrait ? clampRange(innerWidth / 820, 0.70, 0.86) : (narrow ? 0.92 : 1.04);
   var shelfCtl = shelfSettings();
-  return {
+  var profile = {
     portrait: portrait,
     narrow: narrow,
     sideX: (skullShelf ? (portrait ? 0.22 : (narrow ? 0.46 : 0.76)) : (portrait ? 1.56 : (narrow ? 2.48 : 3.18))) + shelfCtl.x,
@@ -13296,6 +13320,24 @@ function shelfLayoutProfile() {
       rowScale: skullShelf ? (portrait ? 0.90 : 1.02) : (portrait ? 0.88 : (narrow ? 0.96 : 1.00))
     }
   };
+  // [Mobile Hotfix] 竖屏: 水平视场收窄, 原布局把侧栏卡片中心放在
+  // 可见区之外(只露半张)。按视锥宽度动态夹取卡片与详情面板位置。
+  if (portrait && typeof portraitVisibleHalfWidth === 'function') {
+    var camDist = Number(typeof orbit !== 'undefined' && orbit && orbit.radius);
+    if (!isFinite(camDist) || camDist <= 0) camDist = 6.6;
+    var sideHalfW = portraitVisibleHalfWidth(Math.max(2.4, camDist - profile.sideZ));
+    var cardHalf = 1.03 * profile.sideScale;   /* 卡片几何宽 2.05 的一半 × 缩放 */
+    if (sideHalfW - cardHalf < profile.sideX) {
+      profile.sideScale *= 0.84;               /* 先缩小卡片再收拢位置 */
+      cardHalf = 1.03 * profile.sideScale;
+      profile.sideX = clampRange(sideHalfW - cardHalf - 0.05, 0.40, profile.sideX);
+      profile.sideDetailShift = Math.min(profile.sideDetailShift, 0.16);
+    }
+    var detHalfW = portraitVisibleHalfWidth(Math.max(2.4, camDist - profile.detail.z));
+    var panelHalf = 1.33 * profile.detail.scale; /* 详情面板宽 2.62 的一半 × 缩放 */
+    profile.detail.x = Math.min(profile.detail.x, Math.max(0, detHalfW - panelHalf - 0.04));
+  }
+  return profile;
 }
 function shelfHotZoneWidth() {
   var ratio = isPortraitShelfViewport() ? 0.26 : 0.18;
@@ -21827,7 +21869,22 @@ function tickPresetTransition() {
   var wallpaperFlow = presetTransition.to === 5;
   uniforms.uScatter.value = Math.max(uniforms.uScatter.value, fx.scatter + wave * (newVisual ? (wallpaperFlow ? 0.008 : 0.026) : 0.16));
   uniforms.uBurstAmt.value = Math.max(uniforms.uBurstAmt.value, wave * (wallpaperFlow ? 0.045 : (newVisual ? 0.12 : 0.15)));
-  uniforms.uPointScale.value = fx.point * (1 + wave * (wallpaperFlow ? 0.016 : 0.048));
+  // [Mobile Hotfix] 竖屏: 封面粒子按视锥宽度缩放, 避免左右被裁切 (仅封面类预设)
+  var coverFit = 1;
+  if (fx.preset === 0 && innerWidth < innerHeight) {
+    coverFit = portraitCoverFitScale();
+    var curFit = particles.scale.x || 1;
+    var nextFit = Math.abs(coverFit - curFit) < 0.003 ? coverFit : curFit + (coverFit - curFit) * 0.10;
+    particles.scale.setScalar(nextFit);
+    if (bloomParticles) bloomParticles.scale.setScalar(nextFit);
+    if (backCoverGroup) backCoverGroup.scale.setScalar(nextFit);
+    coverFit = nextFit;
+  } else if (particles.scale.x !== 1) {
+    particles.scale.setScalar(1);
+    if (bloomParticles) bloomParticles.scale.setScalar(1);
+    if (backCoverGroup) backCoverGroup.scale.setScalar(1);
+  }
+  uniforms.uPointScale.value = fx.point * (1 + wave * (wallpaperFlow ? 0.016 : 0.048)) * (0.72 + 0.28 * coverFit);
   if (raw >= 1) {
     presetTransition.active = false;
     syncFxUniforms();
@@ -27692,6 +27749,59 @@ animate();
       } catch(err){}
     }
   }, true);
+  /* --- 3D 歌单架 / 歌单详情列表: 触屏滑动滚动 ---
+     原实现只监听 wheel 事件, 触屏无法滚动。手指在架子/详情上
+     纵向滑动时, 每累计 52px 换算为一次 scrollBy(±1)。 */
+  (function(){
+    var el = (typeof renderer !== 'undefined' && renderer && renderer.domElement) || null;
+    if (!el) return;
+    var sy = null, acc = 0, mode = null;
+    var STEP = 52;
+    el.addEventListener('touchstart', function(e){
+      mode = null; sy = null;
+      if (!e.touches || e.touches.length !== 1) return;
+      var t = e.touches[0];
+      try {
+        if (typeof shelfManager === 'undefined' || !shelfManager) return;
+        if (shelfManager.hasOpenContent && shelfManager.hasOpenContent()) {
+          mode = 'detail';                       /* 详情打开: 全屏区域可滑 */
+        } else if (shelfManager.getMode && shelfManager.getMode() !== 'off'
+                   && shelfManager.canInteract && shelfManager.canInteract()) {
+          /* 侧栏模式: 右侧热区或直接命中卡片时接管滑动 */
+          var inZone = typeof isShelfWheelZone === 'function' && isShelfWheelZone(t);
+          var onCard = false;
+          try {
+            var rc = typeof raycasterFromPointerEvent === 'function' && raycasterFromPointerEvent(t);
+            onCard = !!(rc && typeof pointerCardHit === 'function' && pointerCardHit(rc, t, 24));
+          } catch(e2){}
+          if (inZone || onCard) mode = 'shelf';
+        }
+      } catch(err){ mode = null; }
+      if (mode) { sy = t.clientY; acc = 0; }
+    }, { passive: true });
+    el.addEventListener('touchmove', function(e){
+      if (sy === null || !mode) return;
+      var t = e.touches && e.touches[0];
+      if (!t) return;
+      acc += (sy - t.clientY);
+      sy = t.clientY;
+      while (Math.abs(acc) >= STEP) {
+        var dir = acc > 0 ? 1 : -1;
+        acc -= dir * STEP;
+        try {
+          if (mode === 'detail') {
+            var cl = shelfManager.getContentList && shelfManager.getContentList();
+            if (cl && cl.scrollBy) cl.scrollBy(dir);
+          } else if (shelfManager.scrollBy) {
+            shelfManager.scrollBy(dir);
+          }
+          if (typeof markRenderInteraction === 'function') markRenderInteraction('shelf-touch', 900);
+        } catch(err){}
+      }
+    }, { passive: true });
+    el.addEventListener('touchend', function(){ sy = null; mode = null; }, { passive: true });
+    el.addEventListener('touchcancel', function(){ sy = null; mode = null; }, { passive: true });
+  })();
 })();
 </script>
 </body>
