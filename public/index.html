@@ -322,6 +322,10 @@ body.home-wallpaper-preview #canvas-container{filter:none}
 .home-recent-song-card.is-empty{cursor:default;pointer-events:none;opacity:.90}
 .home-recent-song-card.is-empty .home-recent-song-bottom{align-items:center}
 .home-recent-song-card.is-empty .home-recent-song-play{display:none}
+/* [Fix 2026-07] "免登录试听"引导态: 与 is-empty 视觉一致但必须保持可点击(is-empty 的 pointer-events:none 曾导致此卡点不动) */
+.home-recent-song-card.is-demo{cursor:pointer;opacity:1}
+.home-recent-song-card.is-demo .home-recent-song-play{display:flex}
+.home-recent-song-card:active{transform:scale(.985)}
 .home-sub{grid-column:1;margin-top:14px;font-size:13px;line-height:1.62;color:rgba(255,255,255,.62);max-width:348px}
 .home-weather-meta{grid-column:1;display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
 .home-weather-pill{height:28px;padding:0 10px;border-radius:999px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.050);display:inline-flex;align-items:center;color:rgba(255,255,255,.70);font-size:11px;font-weight:680}
@@ -2395,7 +2399,7 @@ html.bodhibeats-mobile #bottom-bar.visible.soft-hidden{
   <div class="empty-home-shell">
     <div class="home-hero">
       <div class="home-hero-inner home-construction-inner">
-        <div class="home-recent-song-card" id="home-recent-song-card" onclick="playHomeRecent()" role="button" tabindex="0" aria-label="继续播放上次听过的歌曲">
+        <div class="home-recent-song-card" id="home-recent-song-card" onclick="playHomeRecent()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();playHomeRecent();}" role="button" tabindex="0" aria-label="继续播放上次听过的歌曲">
           <div class="home-recent-song-art" id="home-recent-song-art"></div>
           <div class="home-recent-song-bottom">
             <div class="home-recent-song-info">
@@ -16253,13 +16257,16 @@ function renderHomeRecentSong() {
   var recent = summary && summary.recent ? summary.recent : null;
   if (!recent || (!recent.name && !recent.cover)) {
     // [Feature 2026-07] 空状态引导免登录试听: 点击此卡即可直接开播(见 playHomeRecent 的无记录分支)
+    // [Fix 2026-07] 不能再用 is-empty(pointer-events:none 会让"点这里直接开始听"点不动), 改用可点击的 is-demo
     ensureDemoTrackCovers();
     var demoFirst = BODHI_DEMO_TRACKS[0];
-    card.classList.add('is-empty');
-    art.classList.add('is-empty');
+    card.classList.remove('is-empty');
+    card.classList.add('is-demo');
     if (demoFirst && demoFirst.cover) {
+      art.classList.remove('is-empty');
       art.style.backgroundImage = 'url("' + cssImageUrl(demoFirst.cover) + '")';
     } else {
+      art.classList.add('is-empty');
       art.style.backgroundImage = '';
     }
     art.removeAttribute('data-cover');
@@ -16268,6 +16275,7 @@ function renderHomeRecentSong() {
     return;
   }
   card.classList.remove('is-empty');
+  card.classList.remove('is-demo');
   art.classList.remove('is-empty');
   if (recent.cover) {
     var coverUrl = coverUrlWithSize ? coverUrlWithSize(recent.cover, 240) : recent.cover;
@@ -16722,6 +16730,8 @@ async function playHomePrivateRadio() {
   openHomeLibrary();
 }
 function playHomeSong(index) {
+  primeAudioPlaybackGesture(); // [Fix 2026-07] 点击手势内激活音频链路(Safari/移动端)
+  resetAutoSkipChain();        // [Fix 2026-07] 手动点歌打断自动跳歌连锁
   homeForcedOpen = false;
   homeSuppressed = false;
   setHomeControlsLocked(false);
@@ -16736,7 +16746,7 @@ function playHomeSong(index) {
   safeRenderQueuePanel('home-song-card');
   safeShelfRebuild('home-song-card', true);
   forcePlaybackControlsInteractive();
-  playQueueAt(currentIdx).catch(function(e){ console.warn('[HomeSongPlay]', e); });
+  playQueueAt(currentIdx, { manual: true }).catch(function(e){ console.warn('[HomeSongPlay]', e); });
 }
 function openHomePlaylist(index) {
   homeForcedOpen = false;
@@ -16960,6 +16970,8 @@ async function playDemoTracks(startIdx) {
   await playQueueAt(startIdx, { manual: true });
 }
 async function playHomeRecent(record) {
+  primeAudioPlaybackGesture(); // [Fix 2026-07] 点击手势内激活音频链路(Safari/移动端)
+  resetAutoSkipChain();        // [Fix 2026-07] 手动点歌打断自动跳歌连锁
   record = record || homeListenSummary().recent;
   if (!record) {
     // [Feature 2026-07] 没有听歌记录时, "继续播放"卡直接开播免登录试听
@@ -16980,7 +16992,7 @@ async function playHomeRecent(record) {
   safeRenderQueuePanel('home-recent-song');
   safeShelfRebuild('home-recent-song', true);
   forcePlaybackControlsInteractive();
-  await playQueueAt(0);
+  await playQueueAt(0, { manual: true }); // [Fix 2026-07] 手动入口, 播放时重置熔断计数
 }
 function openHomeInsight() {
   var summary = homeListenSummary();
@@ -16995,6 +17007,8 @@ function openHomeInsight() {
   showToast('播放几首歌后会生成听歌画像');
 }
 async function playWeatherSong(index) {
+  primeAudioPlaybackGesture(); // [Fix 2026-07] 点击手势内激活音频链路(Safari/移动端)
+  resetAutoSkipChain();        // [Fix 2026-07] 手动点歌打断自动跳歌连锁
   var radio = homeWeatherRadioState.radio;
   var songs = radio && radio.songs || [];
   if (!songs[index]) {
@@ -19033,7 +19047,7 @@ function skipFailedQueueItem(idx, token, message) {
     showSourceFallbackNotice('没有可跳过的下一首', message || '当前歌曲不可播放，队列里没有其他歌曲。');
     return;
   }
-  var maxChain = Math.min(playQueue.length, 6);
+  var maxChain = Math.min(playQueue.length, 2); // [Fix 2026-07] 熔断上限收紧到 2 首, 减少移动端切歌风暴
   autoSkipChainCount++;
   if (autoSkipChainCount > maxChain) {
     resetAutoSkipChain();
@@ -19298,7 +19312,10 @@ async function playQueueAt(idx, opts) {
     }
     bindPlaybackProgressEvents(audio);
     applyVolumeToAudio();
-    var proxyAudioUrl = '/api/audio?url=' + encodeURIComponent(data.url);
+    // [Fix 2026-07] 免登录试听兜底: 站内代理取不到 soundhelix 时(未放行外域), 直连源站重试一次
+    var proxyAudioUrl = (isDemoPlayback && opts.demoDirectRetry)
+      ? data.url
+      : '/api/audio?url=' + encodeURIComponent(data.url);
     audio.src = proxyAudioUrl;
     updatePlaybackProgressUi();
     audio.onended = function(){
@@ -19376,6 +19393,12 @@ async function playQueueAt(idx, opts) {
     if (playbackStarted) resetAutoSkipChain(); // [Fix 2026-07 · 跳歌风暴] 成功播出即重置连续失败计数
     if (!playbackStarted) {
       if (isQQPlayback && await retryQQPlaybackWithCompatibleQuality(song, idx, token, opts, data, requestedQuality)) return;
+      // [Fix 2026-07] 免登录试听: 媒体加载报错(非自动播放拦截)时直连源站重试一次
+      if (isDemoPlayback && !opts.demoDirectRetry && audio && audio.error) {
+        showSourceFallbackNotice('试听源切换', '站内代理暂时取不到试听音频，正在直连源站重试。');
+        await playQueueAt(idx, Object.assign({}, opts, { demoDirectRetry: true }));
+        return;
+      }
       forcePlaybackControlsInteractive();
       if (opts.manual) {
         showToast('播放启动失败，请重新选择歌曲');
