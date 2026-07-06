@@ -16107,6 +16107,13 @@ function renderHomeTiles() {
   var loggedOutHome = !homeDiscoverState.loggedIn && !hasAnyPlatformLogin();
   var weatherSongs = homeWeatherRadioState.radio && homeWeatherRadioState.radio.songs || [];
   var summary = homeListenSummary();
+  // [Feature 2026-07] 未登录时优先给出可以直接播放的免登录试听曲目, 让用户不登录也能体验播放器
+  if (loggedOutHome) {
+    ensureDemoTrackCovers();
+    BODHI_DEMO_TRACKS.slice(0, 3).forEach(function(t, i){
+      tiles.push({ kind: 'demo', index: i, title: t.name, sub: '免登录试听 · 点击即播', cover: t.cover, tone: 'daily' });
+    });
+  }
   if (summary.recent && tiles.length < 5) {
     tiles.push({ kind: 'recent', title: summary.recent.name || '继续听', sub: summary.recent.artist || summary.recent.source || '', cover: summary.recent.cover, record: summary.recent });
   }
@@ -16245,12 +16252,19 @@ function renderHomeRecentSong() {
   var summary = homeListenSummary();
   var recent = summary && summary.recent ? summary.recent : null;
   if (!recent || (!recent.name && !recent.cover)) {
+    // [Feature 2026-07] 空状态引导免登录试听: 点击此卡即可直接开播(见 playHomeRecent 的无记录分支)
+    ensureDemoTrackCovers();
+    var demoFirst = BODHI_DEMO_TRACKS[0];
     card.classList.add('is-empty');
     art.classList.add('is-empty');
-    art.style.backgroundImage = '';
+    if (demoFirst && demoFirst.cover) {
+      art.style.backgroundImage = 'url("' + cssImageUrl(demoFirst.cover) + '")';
+    } else {
+      art.style.backgroundImage = '';
+    }
     art.removeAttribute('data-cover');
-    titleEl.textContent = '还没有听歌记录';
-    artistEl.textContent = '去搜索一首歌开始听吧';
+    titleEl.textContent = '免登录试听精选';
+    artistEl.textContent = '不用登录，点这里直接开始听';
     return;
   }
   card.classList.remove('is-empty');
@@ -16887,12 +16901,74 @@ function songFromListenRecord(record) {
     cover: record.cover || '',
   };
 }
+/* ============================================================
+   [Feature 2026-07] 免登录试听精选
+   来源: SoundHelix (soundhelix.com, T. Schürger 创作, 明确允许自由使用的示例曲库)。
+   音频与其他平台歌曲一样经由本站 /api/audio 代理加载(同源, 兼容可视化的 CORS 要求)。
+   如果后端代理限制了外部域名, 需要放行 www.soundhelix.com。
+   ============================================================ */
+var BODHI_DEMO_TRACKS = [
+  { type: 'demo', id: 'demo-helix-1', demoUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3', name: 'Helix Sunrise', artist: 'SoundHelix · T. Schürger', album: '免登录试听精选', duration: 0, demoHue: 358 },
+  { type: 'demo', id: 'demo-helix-2', demoUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3', name: 'Neon Drift', artist: 'SoundHelix · T. Schürger', album: '免登录试听精选', duration: 0, demoHue: 208 },
+  { type: 'demo', id: 'demo-helix-3', demoUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3', name: 'Glass Orbit', artist: 'SoundHelix · T. Schürger', album: '免登录试听精选', duration: 0, demoHue: 165 },
+  { type: 'demo', id: 'demo-helix-8', demoUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3', name: 'Velvet Circuit', artist: 'SoundHelix · T. Schürger', album: '免登录试听精选', duration: 0, demoHue: 268 },
+  { type: 'demo', id: 'demo-helix-10', demoUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-10.mp3', name: 'Amber Tide', artist: 'SoundHelix · T. Schürger', album: '免登录试听精选', duration: 0, demoHue: 34 },
+];
+// 运行时生成渐变封面(data URL), 无外部图片依赖; coverUrlWithSize 对非 http URL 原样透传, 全链路兼容。
+function ensureDemoTrackCovers() {
+  if (ensureDemoTrackCovers._done) return;
+  ensureDemoTrackCovers._done = true;
+  BODHI_DEMO_TRACKS.forEach(function(t){
+    if (t.cover) return;
+    try {
+      var c = document.createElement('canvas');
+      c.width = c.height = 240;
+      var g = c.getContext('2d');
+      var hue = Number(t.demoHue) || 200;
+      var grad = g.createLinearGradient(0, 0, 240, 240);
+      grad.addColorStop(0, 'hsl(' + hue + ',72%,56%)');
+      grad.addColorStop(1, 'hsl(' + ((hue + 52) % 360) + ',68%,26%)');
+      g.fillStyle = grad; g.fillRect(0, 0, 240, 240);
+      g.globalAlpha = 0.28; g.strokeStyle = '#fff'; g.lineWidth = 2;
+      for (var r = 26; r <= 110; r += 14) { g.beginPath(); g.arc(120, 120, r, 0, Math.PI * 2); g.stroke(); }
+      g.globalAlpha = 0.92; g.fillStyle = 'rgba(255,255,255,.94)';
+      g.font = '700 88px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText((t.name || 'D').charAt(0), 120, 126);
+      t.cover = c.toDataURL('image/jpeg', 0.86);
+    } catch (e) { t.cover = ''; }
+  });
+}
+function demoTrackIndexById(id) {
+  var key = String(id || '');
+  for (var i = 0; i < BODHI_DEMO_TRACKS.length; i++) if (String(BODHI_DEMO_TRACKS[i].id) === key) return i;
+  return -1;
+}
+async function playDemoTracks(startIdx) {
+  ensureDemoTrackCovers();
+  startIdx = Math.max(0, Math.min(BODHI_DEMO_TRACKS.length - 1, Number(startIdx) || 0));
+  primeAudioPlaybackGesture(); // 手势内激活音频链路(Safari/移动端)
+  resetAutoSkipChain();
+  homeForcedOpen = false;
+  homeSuppressed = false;
+  if (typeof setHomeControlsLocked === 'function') setHomeControlsLocked(false);
+  activeRadioContext = null;
+  playQueue = BODHI_DEMO_TRACKS.map(function(s){ return cloneSong(s); });
+  currentIdx = startIdx;
+  safeRenderQueuePanel('demo-tracks');
+  safeShelfRebuild('demo-tracks', true);
+  forcePlaybackControlsInteractive();
+  await playQueueAt(startIdx, { manual: true });
+}
 async function playHomeRecent(record) {
   record = record || homeListenSummary().recent;
   if (!record) {
-    showToast('还没有听歌记录');
+    // [Feature 2026-07] 没有听歌记录时, "继续播放"卡直接开播免登录试听
+    playDemoTracks(0);
     return;
   }
+  // 上次听的是免登录试听曲目 → 直接回到试听队列对应曲目
+  var demoIdx = demoTrackIndexById(record.id || record.key || '');
+  if (demoIdx >= 0) { playDemoTracks(demoIdx); return; }
   var song = songFromListenRecord(record);
   if (!song || (!song.id && !song.mid)) {
     runHomeSearch(record.name || '');
@@ -16941,7 +17017,8 @@ function handleHomeTileClick(index) {
   var row = document.getElementById('home-tile-row');
   var item = row && row._homeTiles && row._homeTiles[index];
   if (!item) return;
-  if (item.kind === 'weatherSong') playWeatherSong(item.index);
+  if (item.kind === 'demo') playDemoTracks(item.index); // [Feature 2026-07] 免登录试听
+  else if (item.kind === 'weatherSong') playWeatherSong(item.index);
   else if (item.kind === 'recent') playHomeRecent(item.record);
   else if (item.kind === 'profile') openHomeInsight();
   else if (item.kind === 'song') playHomeSong(item.index);
@@ -16966,6 +17043,7 @@ function songDurationLabel(song) {
 }
 function songSourceLabel(song) {
   if (!song) return '未知';
+  if (song.type === 'demo') return '免登录试听';
   if (song.provider === 'qq' || song.source === 'qq' || song.type === 'qq') return 'QQ 音乐';
   if (song.type === 'local') return '本地上传';
   if (song.type === 'podcast' || song.source === 'podcast') return '网易云播客';
@@ -17549,7 +17627,7 @@ function deleteCustomLyricForCurrent() {
 function isCloudSong(song) {
   if (!song || !song.id) return false;
   if (song.provider === 'qq' || song.source === 'qq' || song.type === 'qq') return false;
-  if (song.type === 'local' || song.type === 'podcast' || song.source === 'podcast') return false;
+  if (song.type === 'local' || song.type === 'podcast' || song.source === 'podcast' || song.type === 'demo') return false;
   return !song.provider || song.provider === 'netease' || song.source === 'netease' || song.type === 'song';
 }
 function isSongLiked(song) {
@@ -18378,8 +18456,54 @@ function initAudio() {
   audioReady = true;
 }
 function resumeAudioAnalysis() {
-  if (audioCtx && audioCtx.state === 'suspended') return audioCtx.resume().catch(function(e){ console.warn('audio context resume failed:', e); });
+  // [Fix 2026-07 · Safari无声] Safari 除 'suspended' 外还有 'interrupted' 状态(来电/切后台),
+  // 且整条声音链路经过 MediaElementSource → AudioContext, ctx 不在 running 时
+  // <audio> 元素照常走进度但完全无声(画面正常/放不出音乐的根因)。
+  if (audioCtx && audioCtx.state !== 'running' && audioCtx.state !== 'closed' && audioCtx.resume) {
+    return audioCtx.resume().catch(function(e){ console.warn('audio context resume failed:', e); });
+  }
   return Promise.resolve();
+}
+
+/* [Fix 2026-07 · Safari无声] 在"用户手势的同步调用栈内"完成 音频元素创建 + WebAudio 初始化 + ctx.resume。
+   Safari/移动端的 AudioContext.resume() 只有在手势内调用才保证成功;
+   原流程是 点击 → await 网络请求 → 才 initAudio/resume, 手势早已过期, ctx 卡在 suspended。
+   所有"点击即播放"的入口在发起异步流程前都应先同步调用本函数。 */
+function primeAudioPlaybackGesture() {
+  try {
+    if (!audio) { audio = new Audio(); audio.crossOrigin = 'anonymous'; }
+    if (!audioReady) initAudio();
+    if (audioCtx && audioCtx.state !== 'running' && audioCtx.state !== 'closed' && audioCtx.resume) {
+      audioCtx.resume().catch(function(){});
+    }
+  } catch (e) { console.warn('[AudioPrime]', e); }
+}
+
+/* [Fix 2026-07 · Safari无声] 兜底一:任何用户手势都尝试恢复被挂起的 AudioContext。
+   即使某次播放启动时 ctx 没能恢复(表现为无声), 用户下一次点击/按键会立刻把声音救回来。 */
+(function bindGlobalAudioContextRescue(){
+  var rescue = function(){
+    if (audioCtx && audioCtx.state !== 'running' && audioCtx.state !== 'closed' && audioCtx.resume) {
+      audioCtx.resume().catch(function(){});
+    }
+  };
+  ['pointerdown', 'touchend', 'keydown'].forEach(function(ev){
+    document.addEventListener(ev, rescue, { capture: true, passive: true });
+  });
+})();
+
+/* [Fix 2026-07 · Safari无声] 兜底二:媒体元素已在播放但 ctx 未运行 → 主动 resume,
+   多次失败则提示用户点一下屏幕(点击会触发上面的全局救援)。 */
+var silentPlaybackHintShown = false;
+function watchSilentPlayback() {
+  if (!audio || audio.paused || !audioCtx || audioCtx.state === 'running' || audioCtx.state === 'closed') return;
+  resumeAudioAnalysis();
+  setTimeout(function(){
+    if (audio && !audio.paused && audioCtx && audioCtx.state !== 'running' && audioCtx.state !== 'closed' && !silentPlaybackHintShown) {
+      silentPlaybackHintShown = true;
+      showToast('浏览器暂停了声音输出，点一下屏幕即可恢复');
+    }
+  }, 900);
 }
 
 function ensureUiSfxContext() {
@@ -18745,6 +18869,8 @@ function moveQueueIndexToTop(idx) {
 }
 function playSearchResult(i) {
   var song = playlist[i]; if (!song) return;
+  primeAudioPlaybackGesture(); // [Fix 2026-07] 手势内先激活音频链路(Safari/移动端自动播放策略)
+  resetAutoSkipChain();        // [Fix 2026-07] 手动点歌立即打断自动跳歌连锁
   homeForcedOpen = false;
   homeSuppressed = false;
   setHomeControlsLocked(false);
@@ -18758,7 +18884,7 @@ function playSearchResult(i) {
   }
   $results.classList.remove('show');
   $input.value = ''; $input.blur();
-  playQueueAt(currentIdx);
+  playQueueAt(currentIdx, { manual: true });
 }
 var firstPlayDone = false;
 
@@ -18888,6 +19014,17 @@ function nextUnblockedQueueIndex(idx) {
   }
   return -1;
 }
+/* [Fix 2026-07 · 跳歌风暴] 未登录时整个队列往往都取不到播放地址,
+   原逻辑会 失败→自动换源搜索→再失败→跳下一首 无限连锁:
+   画面不停切歌"持续跳动", 主线程被网络/封面/重建任务塞满, 搜索点击也跟着失灵。
+   处理:① 连续自动跳过设上限(熔断), 到达后停下来明确告知;
+        ② 每次自动跳过之间加 360ms 间隔, 让画面和主线程喘口气;
+        ③ 任意一次成功播放或手动点歌都会重置计数(见 playQueueAt / 手动入口)。 */
+var autoSkipChainCount = 0, autoSkipChainTimer = null;
+function resetAutoSkipChain() {
+  autoSkipChainCount = 0;
+  if (autoSkipChainTimer) { clearTimeout(autoSkipChainTimer); autoSkipChainTimer = null; }
+}
 function skipFailedQueueItem(idx, token, message) {
   hideLoading();
   if (token !== trackSwitchToken) return;
@@ -18896,14 +19033,31 @@ function skipFailedQueueItem(idx, token, message) {
     showSourceFallbackNotice('没有可跳过的下一首', message || '当前歌曲不可播放，队列里没有其他歌曲。');
     return;
   }
+  var maxChain = Math.min(playQueue.length, 6);
+  autoSkipChainCount++;
+  if (autoSkipChainCount > maxChain) {
+    resetAutoSkipChain();
+    if (audio && !audio.paused) { try { audio.pause(); } catch (_) {} playing = false; setPlayIcon(false); }
+    var hint = hasAnyPlatformLogin()
+      ? '连续多首歌曲不可播放，已暂停自动跳过。可以换一个歌单或稍后再试。'
+      : '连续多首歌曲不可播放，已暂停自动跳过。未登录能播的歌很少——可以登录账号，或到首页试试「免登录试听」精选。';
+    showSourceFallbackNotice('已暂停自动跳过', hint);
+    return;
+  }
   var nextIdx = nextUnblockedQueueIndex(idx);
   if (nextIdx < 0) {
+    resetAutoSkipChain();
     showSourceFallbackNotice('队列暂时没有可播歌曲', '已尝试绕开受限歌曲，当前队列没有新的可播放项。');
     return;
   }
   showSourceFallbackNotice('已跳过受限歌曲', message || '未找到同名同歌手的另一个平台版本，正在播放下一首。');
   currentIdx = nextIdx;
-  playQueueAt(nextIdx, { fallbackDepth: 0 });
+  if (autoSkipChainTimer) clearTimeout(autoSkipChainTimer);
+  autoSkipChainTimer = setTimeout(function(){
+    autoSkipChainTimer = null;
+    if (token !== trackSwitchToken) return; // 等待期间用户手动点了别的歌 → 放弃这次自动跳
+    playQueueAt(nextIdx, { fallbackDepth: 0 });
+  }, 360);
 }
 async function tryAutoPlaybackFallback(song, data, idx, token, opts) {
   opts = opts || {};
@@ -18911,7 +19065,7 @@ async function tryAutoPlaybackFallback(song, data, idx, token, opts) {
     skipFailedQueueItem(idx, token, '自动换源后的版本仍不可播，正在播放下一首。');
     return true;
   }
-  if (!song || song.type === 'local' || song.type === 'podcast' || song.source === 'podcast') return false;
+  if (!song || song.type === 'local' || song.type === 'podcast' || song.source === 'podcast' || song.type === 'demo') return false;
   var restriction = (data && data.restriction) || {};
   var category = (data && data.reason) || restriction.category || '';
   var fromLabel = playbackProviderLabel(song);
@@ -18940,6 +19094,9 @@ async function tryAutoPlaybackFallback(song, data, idx, token, opts) {
 }
 function handlePlaybackUnavailable(song, data) {
   hideLoading();
+  // [Fix 2026-07 · 音画不同步] 兜底:当前歌确定不可播时, 无论此前哪个异步分支把声音带了起来, 一律拉停,
+  // 避免"封面显示 A(不可播)、耳朵里放着上一首 B"。
+  if (audio && !audio.paused) { try { audio.pause(); } catch (_) {} playing = false; setPlayIcon(false); }
   forcePlaybackControlsInteractive();
   var provider = playbackLoginProvider(song);
   var restriction = (data && data.restriction) || {};
@@ -19089,18 +19246,22 @@ async function playQueueAt(idx, opts) {
     });
   }
 
+  if (opts.manual) resetAutoSkipChain(); // [Fix 2026-07 · 跳歌风暴] 手动播放重置连锁计数
   try {
     markPlayPhase('source-url');
-    var isQQPlayback = songProviderKey(song) === 'qq';
+    var isDemoPlayback = !!(song && song.type === 'demo' && song.demoUrl); // [Feature 2026-07 · 免登录试听]
+    var isQQPlayback = !isDemoPlayback && songProviderKey(song) === 'qq';
     var requestedQuality = normalizePlaybackQuality(opts.qualityOverride || playbackQuality);
     if (!isQQPlayback && requestedQuality === 'jymaster' && !hasProviderSvip('netease', loginStatus)) requestedQuality = 'hires';
     if (isQQPlayback && qqPlaybackQualityCeiling && (requestedQuality === 'jymaster' || requestedQuality === 'hires' || requestedQuality === 'lossless')) {
       requestedQuality = qqPlaybackQualityCeiling;
     }
     var qualityParam = '&quality=' + encodeURIComponent(requestedQuality);
-    var data = isQQPlayback
-      ? await apiJson('/api/qq/song/url?mid=' + encodeURIComponent(song.mid || song.songmid || song.id || '') + '&mediaMid=' + encodeURIComponent(song.mediaMid || song.media_mid || '') + qualityParam)
-      : await apiJson('/api/song/url?id=' + song.id + qualityParam);
+    var data = isDemoPlayback
+      ? { url: song.demoUrl, level: 'standard' } // [Feature 2026-07 · 免登录试听] 免费曲库直连, 不经平台取址
+      : (isQQPlayback
+        ? await apiJson('/api/qq/song/url?mid=' + encodeURIComponent(song.mid || song.songmid || song.id || '') + '&mediaMid=' + encodeURIComponent(song.mediaMid || song.media_mid || '') + qualityParam)
+        : await apiJson('/api/song/url?id=' + song.id + qualityParam));
     if (token !== trackSwitchToken) return;
     if (!data.url) {
       if (isQQPlayback && await retryQQPlaybackWithCompatibleQuality(song, idx, token, opts, data, requestedQuality)) return;
@@ -19109,7 +19270,7 @@ async function playQueueAt(idx, opts) {
       return;
     }
     var resolvedQualityText = playbackResolvedQualityText(data);
-    if (!isQQPlayback && playbackQualityWasDowngraded(requestedQuality, data.level)) {
+    if (!isDemoPlayback && !isQQPlayback && playbackQualityWasDowngraded(requestedQuality, data.level)) {
       showSourceFallbackNotice('网易云音质自动降级', '请求 ' + playbackQualityLabel(requestedQuality) + '，实际播放 ' + resolvedQualityText + '。');
     } else if (opts.qualitySwitch) {
       showSourceFallbackNotice('音质已切换', '实际播放: ' + resolvedQualityText + '。');
@@ -19210,7 +19371,9 @@ async function playQueueAt(idx, opts) {
       safePlaybackStep('visual-prep-hide-chip', hideBeatChip);
     }
     markPlayPhase('audio-start');
-    var playbackStarted = await playAudio({ silent: isQQPlayback });
+    var playbackStarted = await playAudio({ silent: isQQPlayback, token: token });
+    if (token !== trackSwitchToken) return; // [Fix 2026-07 · 音画不同步] 播放启动期间又切了歌, 本流程作废
+    if (playbackStarted) resetAutoSkipChain(); // [Fix 2026-07 · 跳歌风暴] 成功播出即重置连续失败计数
     if (!playbackStarted) {
       if (isQQPlayback && await retryQQPlaybackWithCompatibleQuality(song, idx, token, opts, data, requestedQuality)) return;
       forcePlaybackControlsInteractive();
@@ -19225,7 +19388,8 @@ async function playQueueAt(idx, opts) {
     markPlayPhase('session-begin');
     safePlaybackStep('listen-session-begin', function(){ beginListenSession(song, playbackContext); });
     markPlayPhase('lyrics-fetch');
-    if (song.type === 'podcast') {
+    if (song.type === 'podcast' || song.type === 'demo') {
+      // [Feature 2026-07 · 免登录试听] demo 曲目为纯音乐, 与播客一样走本地歌词回退, 不请求平台歌词接口
       safePlaybackStep('podcast-lyrics', function(){
         var podcastLyricLines = withLyricFallback([]);
         setOriginalLyricsState(podcastLyricLines, false, 'fallback');
@@ -19260,8 +19424,17 @@ async function playQueueAt(idx, opts) {
 }
 async function attemptAudioPlay(opts) {
   opts = opts || {};
+  /* [Fix 2026-07 · 音画不同步] token 守卫。
+     根因:playQueueAt(旧歌) 可能停在某个 await(取URL/读缓存)时用户按了下一首;
+     新歌流程先暂停了音频、把封面/歌词切到新歌, 然后自己也进入 await;
+     此时旧流程恢复执行, 调 audio.play() —— src 还是旧歌 → 旧歌复活;
+     如果新歌随后取 URL 失败(VIP/版权/无地址)提前 return, 就出现
+     "画面是下一首、耳朵里是上一首"。带上发起时的 token, 每个异步边界校验,
+     发现自己已过期就绝不碰 play(), 已经播出去的立即拉停。 */
+  function stale() { return opts.token != null && opts.token !== trackSwitchToken; }
   try {
       if (!audio) return false;
+      if (stale()) return false;
       if (!audioReady) initAudio();
       if (opts.fade !== false) preparePlaybackFadeIn();
       if (opts.manual) {
@@ -19270,8 +19443,10 @@ async function attemptAudioPlay(opts) {
         await manualPlay;
       } else {
         await resumeAudioAnalysis();
+        if (stale()) return false;
         await audio.play();
       }
+      if (stale()) { try { audio.pause(); } catch (_) {} restorePlaybackGain(); return false; }
       await resumeAudioAnalysis();
       switchPlaybackVisualToEmily();
       playing = true; setPlayIcon(true);
@@ -19292,11 +19467,12 @@ async function attemptAudioPlay(opts) {
 }
 async function playAudio(opts) {
   opts = opts || {};
-  return attemptAudioPlay({ manual: false, silent: !!opts.silent });
+  return attemptAudioPlay({ manual: false, silent: !!opts.silent, token: opts.token });
 }
 async function togglePlay() {
   if (playToggleBusy) return;
   playToggleBusy = true;
+  primeAudioPlaybackGesture(); // [Fix 2026-07] 点击手势内激活音频链路
   try {
     forcePlaybackControlsInteractive();
     if ((!audio || !audio.src) && playQueue.length && currentIdx >= 0) {
@@ -19305,7 +19481,7 @@ async function togglePlay() {
     }
     if (!audio) return;
     if (audio.paused || audio.ended) {
-      await attemptAudioPlay({ manual: true });
+      await attemptAudioPlay({ manual: true, token: trackSwitchToken });
     } else {
       await fadeOutAndPauseAudio();
       playing = false;
@@ -19334,6 +19510,7 @@ function setPlayIcon(p) {
 }
 function nextTrack() {
   if (!playQueue.length) return;
+  primeAudioPlaybackGesture(); // [Fix 2026-07] 点击手势内激活音频链路
   playToggleBusy = false;
   forcePlaybackControlsInteractive();
   if (playMode === 'shuffle') currentIdx = Math.floor(Math.random() * playQueue.length);
@@ -19342,6 +19519,7 @@ function nextTrack() {
 }
 function prevTrack() {
   if (!playQueue.length) return;
+  primeAudioPlaybackGesture(); // [Fix 2026-07] 点击手势内激活音频链路
   playToggleBusy = false;
   forcePlaybackControlsInteractive();
   currentIdx = (currentIdx - 1 + playQueue.length) % playQueue.length;
@@ -20549,6 +20727,8 @@ function updatePlaybackProgressUi() {
 function bindPlaybackProgressEvents(audioEl) {
   if (!audioEl || audioEl._bodhibeatsProgressBound) return;
   audioEl._bodhibeatsProgressBound = true;
+  // [Fix 2026-07 · Safari无声] 元素开始出声(playing)时校验 AudioContext 是否真的在运行
+  audioEl.addEventListener('playing', watchSilentPlayback);
   ['loadedmetadata', 'durationchange', 'timeupdate', 'seeked', 'play', 'pause', 'emptied'].forEach(function(name){
     audioEl.addEventListener(name, updatePlaybackProgressUi);
   });
